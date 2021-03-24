@@ -1,0 +1,146 @@
+---
+title: ''
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(censusapi)
+library(tigris) 
+library(tidyverse)
+library(dplyr) 
+library(sf)
+library(clipr)
+library(xlsx)
+library(leaflet)
+library(scales)
+library(ggmap)
+library(ggplot2)
+library(forcats)
+library(lubridate)
+library(zoo)
+```
+
+
+``` {r import demo data, covid vulnerability, other variables etc.}
+# import zcta census geographies
+ZCTA_select = st_read("../layers/ZCTA_select.shp")
+getwd()
+```
+
+
+``` {r download vaccination data from Chicago data portal}
+# Download vaccinations by zip code data for Chicago
+Chicago_COVID19Vaccinations_ByZCTA <- read_csv(file="https://data.cityofchicago.org/api/views/553k-3xzc/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
+Chicago_COVID19Vaccinations_ByZCTA <- Chicago_COVID19Vaccinations_ByZCTA %>% rename("zcta"="Zip Code", "date"="Date", "doses_daily"="Total Doses - Daily", "doses_cum"="Total Doses - Cumulative", "fdose_daily"="1st Dose - Daily", "fdose_cum"="1st Dose - Cumulative", "fdose_pctpop"="1st Dose - Percent Population", "com_daily"="Vaccine Series Completed - Daily", "com_cum"="Vaccine Series Completed - Cumulative", "com_pctpop"="Vaccine Series Completed  - Percent Population", "pop"="Population", "geometry"="ZIP Code Location")
+Chicago_COVID19Vaccinations_ByZCTA$date <- as.Date(Chicago_COVID19Vaccinations_ByZCTA$date, "%m/%d/%Y") # reformat date text to date data type
+
+Chicago_COVID19Vaccinations_ByZCTA <- Chicago_COVID19Vaccinations_ByZCTA %>% 
+  mutate(ymw = ceiling_date(date, "week"))
+
+# Create summaries for welcome page daily time series
+Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  filter(pop>0) %>% 
+  group_by(date) %>% 
+  arrange(date) %>% 
+  summarise(doses = sum(doses_daily), 
+            dosescm = sum(doses_cum), 
+            fdoses = sum(fdose_daily),
+            fdosescm = sum(fdose_cum), 
+            sdoses = sum(com_daily), 
+            sdosescm = sum(com_cum),
+            pop=max(pop))
+
+Chicago_COVID19Vaccinations_ByZCTA_Sum[is.na(Chicago_COVID19Vaccinations_ByZCTA_Sum)] <- 0
+
+Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA_Sum %>% 
+  mutate(doses7d = rollmean(x=doses, k=7, fill=0, align="right"), 
+         dosert = dosescm/pop*100, 
+         fdoses7d = rollmean(x=fdoses, k=7, fill=0, align="right"), 
+         fdosert = fdosescm/pop*100, sdoses7d = rollmean(x=sdoses, k=7, fill=0, align="right"), 
+         sdosert = sdosescm/pop*100)
+
+# Create latest vaccinations csv and shapefile
+Chicago_COVID19Vaccinations_ByZCTA <- Chicago_COVID19Vaccinations_ByZCTA %>% 
+  mutate(zcta_char = as.character(zcta))
+Chicago_COVID19Vaccinations_ByZCTA_GEOM <- Chicago_COVID19Vaccinations_ByZCTA %>% 
+  select(-geometry) %>% 
+  left_join(ZCTA_select, by=c("zcta_char"="ZCTA5"))
+Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest <- Chicago_COVID19Vaccinations_ByZCTA_GEOM %>% 
+  filter(date==max(date)) %>%
+  drop_na(ZCTA5No)
+st_write(Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest,"../layers/Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest.shp", append=FALSE)
+write.csv(Chicago_COVID19Vaccinations_ByZCTA_Sum,"../data/vaccinationssummary_chicago.csv")
+```
+
+``` {r flag zip codes participating in Protect Chicago Plus program}
+# https://www.accessliving.org/newsroom/action-alerts/updates-from-access-living-protect-chicago-plus-vaccine-program-al-town-hall-recordings-posted/
+
+ZCTA_select <- ZCTA_select %>% 
+  mutate(pcp = ifelse(
+    ZCTA5=="60636" | 
+      ZCTA5=="60609" | 
+      ZCTA5=="60632" | 
+      ZCTA5=="60623" |
+      ZCTA5=="60629" |
+      ZCTA5=="60621" |
+      ZCTA5=="60628" |
+      ZCTA5=="60632" |
+      ZCTA5=="60620" |
+      ZCTA5=="60644" |
+      ZCTA5=="60639" |
+      ZCTA5=="60617", 
+    "YES", "NO")) %>%
+  select(ZCTA5,pcp)
+
+plot(ZCTA_select["pcp"])
+```
+
+``` {r combine demo tables}
+demodatabyzcta <- read_csv("../data/demodatabyzcta_acs2019.csv") %>%
+  mutate(ZCTA=as.character(ZCTA))
+
+demodatabyzcta_chicago <- ZCTA_select %>%
+  st_drop_geometry() %>% 
+  left_join(demodatabyzcta, by=c("ZCTA5"="ZCTA"))
+
+Chicago_COVID19Vaccinations_ByZCTA_GEOM_All <- Chicago_COVID19Vaccinations_ByZCTA_GEOM %>%
+  left_join(demodatabyzcta_chicago, by=c("zcta"="ZCTA5"))
+
+```
+
+``` {r summary statistics, bivariate correlations}
+# Create a bivariate correlation matrix for all factors.
+# If you changed factors, be sure to change names in select function.
+# Otherwise no editing required.
+
+attach(VulnerabilityData_ByZCTA_geom)
+res <- cor(VulnerabilityData_ByZCTA_sub, use = "complete.obs")
+round(res, 2)
+# corrplot.mixed(res, lower.col = "black") # https://cran.r-project.org/web/packages/corrplot/vignettes/corrplot-intro.html
+corrplot(res, type="upper",order = "hclust", addrect=6,method="square",tl.col = "black")
+rm(res)
+
+vulnerability.hclust <- hcut(VulnerabilityData_ByZCTA_naomit[,c(96:115,118)],4,stand=TRUE)
+fviz_dend(vulnerability.hclust, rect = TRUE, cex = 0.5,
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"))
+
+vulnerability.kmeans <- kmeans(VulnerabilityData_ByZCTA_naomit[,c(96:115,118)],4,nstart=25)
+fviz_cluster(vulnerability.kmeans, data = VulnerabilityData_ByZCTA_naomit,
+             palette = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"),
+             ggtheme = theme_minimal(),
+             main = "Partitioning Clustering Plot"
+)
+
+```
+
+```{r archive covid-19 testing and vaccination locations}
+
+adate <- as.character(Sys.Date())
+
+Chicago_COVID19TestingLocations <- read_csv(file="https://data.cityofchicago.org/api/views/thdn-3grx/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
+Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD")
+write.csv(Chicago_COVID19VaccinationLocations, paste0("../archive/Chicago_COVID19VaccinationLocations_",adate,".csv"))
+write.csv(Chicago_COVID19TestingLocations, paste0("../archive/Chicago_COVID19TestingLocations_",adate,".csv"))
+```
