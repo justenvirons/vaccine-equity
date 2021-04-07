@@ -1,10 +1,10 @@
 ---
-title: ''
+title: 'Equity Analysis of COVID-19 Vaccination in the City of Chicago '
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, results = 'hide')
 
 library(censusapi)
 library(tigris) 
@@ -26,7 +26,6 @@ library(zoo)
 ``` {r import demo data, covid vulnerability, other variables etc.}
 # import zcta census geographies
 ZCTA_select = st_read("../layers/ZCTA_select.shp")
-getwd()
 ```
 
 
@@ -134,6 +133,45 @@ fviz_cluster(vulnerability.kmeans, data = VulnerabilityData_ByZCTA_naomit,
 )
 
 ```
+
+```{r figures}
+
+delete <- Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>% 
+  select(-geometry)
+write_clip(delete)
+
+delete <- Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>%
+  select(date, zcta, pcp, doses_daily) %>%
+  group_by(date, zcta, pcp) %>%
+  arrange(date) %>%
+  summarise(sum(doses_daily))
+
+
+delete <- Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>%
+  select(pcp) %>%
+  group_by(pcp) %>%
+  summarise(n())
+
+write_clip(delete)
+
+Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>% 
+  st_drop_geometry() %>%
+  group_by(pcp) %>%
+  mutate(total=sum(doses_daily), rate=sum(doses_daily)/Total) %>%
+  drop_na(Total) %>%
+  ggplot(aes(x = as.Date(ymw), y=rate, color=pcp)) + 
+  geom_line(size=1.25) +
+  geom_point(size=2) +
+  scale_y_continuous(labels = function(y) format(y, big.mark = ",")) + 
+  scale_x_date(date_breaks = "weeks" , date_labels = "%b %d") +
+  xlab('week ending') +
+  ylab('shots') +
+  scale_color_grey() + 
+  theme_bw()
+
+
+```
+
 
 ```{r archive covid-19 testing and vaccination locations}
 
