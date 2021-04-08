@@ -139,8 +139,9 @@ for (i in 1:nrow(aEndDateList)) {
     group_by(pcp) %>%
     drop_na() %>%
     summarize(Vaccinated = sum(fdose_cum),
-              NotVaccinated = sum(NotVac_totpop))
-
+              # NotVaccinated = sum(NotVac_totpop))
+              NotVaccinated = sum(NotVac_18over))
+  
   ct_CountsbyCategory[is.na(ct_CountsbyCategory)] <- 0
   ct_CountsbyCategory_t <- t(ct_CountsbyCategory[,-1])
   colnames(ct_CountsbyCategory_t) <- ct_CountsbyCategory$pcp
@@ -160,6 +161,8 @@ for (i in 1:nrow(aEndDateList)) {
   achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
 }
 
+write_clip(achisqtable_All)
+
 achisqtable_All <- achisqtable_All %>% 
   rename("Vaccinated"=`rownames(achisqtable_cbind)`,
          "Expected"='achisqtable_exp',
@@ -168,7 +171,7 @@ achisqtable_All$Residual <- achisqtable_All$Observed - achisqtable_All$Expected
 write_clip(achisqtable_All)
 
 # create residual plot
-ggplot(achisqtable_All) + geom_point(aes(x=EndDate,y=Residual, color = Race), shape=1, size = 3, stroke=2) + geom_line(aes(x=EndDate,y=Residual, color = Race), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
+ggplot(achisqtable_All) + geom_point(aes(x=date,y=Residual, color = Vaccinated), shape=1, size = 3, stroke=2) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
 
 # run these lines before running subsequent chi-square analyses
 achisqtable_All <- achisqtable_cbind
@@ -185,9 +188,6 @@ ggplot(Vacs_Totpop) +
 head(delete)
 
 write_clip(delete)
-
-# Join with 
-
 
 ZCTAs_ACS_Vac_Sum_geom <- ZCTAs_ACS_Vac_geom %>% 
   mutate(doses7d = rollmean(x=doses_daily, k=7, fill=0, align="right"), 
@@ -222,20 +222,12 @@ st_write(Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest,"../layers/Chicago_COVID
 write.csv(Chicago_COVID19Vaccinations_ByZCTA_Sum,"../data/vaccinationssummary_chicago.csv")
 
 
+st_write(ZCTA_select, "layers/ZCTA_select.shp", append = FALSE)
+
 ### Vaccine locations in the city -------------------------------------------
 Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
 
-
-
-
-
-plot(ZCTA_select["pcp"])
-```
-
-
-
-
-``` {r summary statistics, bivariate correlations}
+ {r summary statistics, bivariate correlations}
 # Create a bivariate correlation matrix for all factors.
 # If you changed factors, be sure to change names in select function.
 # Otherwise no editing required.
