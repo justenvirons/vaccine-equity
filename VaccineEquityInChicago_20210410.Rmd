@@ -10,11 +10,12 @@ chunk_output_type: console
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-	echo = TRUE,
+	echo = FALSE,
 	message = FALSE,
 	warning = FALSE
 )
 
+library(bookdown)
 library(tidyverse)
 library(dplyr) 
 library(ggplot2)
@@ -27,7 +28,6 @@ library(DT)
 ```
 
 ## Background
-
 ### COVID-19 Burden in Chicago
 
 ```{r background information and maps}
