@@ -32,26 +32,29 @@ library(readxl)
 
 # Import demo data, covid vulnerability, other variables etc. -------------
 ZCTA_select = st_read("layers/ZCTA_select.shp")
+achisqtable_All <- readRDS("data/achisqtable_All.rds")
 
 # Flag zip codes participating in Protect Chicago Plus program ------------
 # https://www.accessliving.org/newsroom/action-alerts/updates-from-access-living-protect-chicago-plus-vaccine-program-al-town-hall-recordings-posted/
 
-ZCTA_select <- ZCTA_select %>% 
-  mutate(pcp = ifelse(
-    ZCTA5=="60636" | 
-      ZCTA5=="60609" | 
-      ZCTA5=="60632" | 
-      ZCTA5=="60623" |
-      ZCTA5=="60629" |
-      ZCTA5=="60621" |
-      ZCTA5=="60628" |
-      ZCTA5=="60632" |
-      ZCTA5=="60620" |
-      ZCTA5=="60644" |
-      ZCTA5=="60639" |
-      ZCTA5=="60617", 
-    "YES", "NO")) %>%
-  select(ZCTA5,pcp)
+# ZCTA_select <- ZCTA_select %>% 
+#   mutate(pcp = ifelse(
+#     ZCTA5=="60636" | 
+#       ZCTA5=="60609" | 
+#       ZCTA5=="60632" | 
+#       ZCTA5=="60623" |
+#       ZCTA5=="60629" |
+#       ZCTA5=="60621" |
+#       ZCTA5=="60628" |
+#       ZCTA5=="60632" |
+#       ZCTA5=="60620" |
+#       ZCTA5=="60644" |
+#       ZCTA5=="60639" |
+#       ZCTA5=="60617", 
+#     "YES", "NO")) %>%
+#   select(ZCTA5,pcp)
+
+# st_write(ZCTA_select,"layers/ZCTA_select.shp", , append=FALSE)
 
 ## Download data from Chicago data portal ----------------
 ### Vaccinations by day and zip code ----------------------------------------
@@ -98,39 +101,90 @@ Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
   mutate(ZCTA5=as.character(zcta))
 
 # Import previously downloaded 2019 demographic data by ZCTA
-ZCTAs_ACS <- read_csv("data/demodatabyzcta_acs2019.csv") %>%
-  mutate(ZCTA=as.character(ZCTA))
+ZCTAs_ACS_Chicago <- read_csv("data/ZCTAs_ACS_Chicago.csv")
 
+#   mutate(ZCTA=as.character(ZCTA))
 # Join with geometries, subset to Chicago ZCTAs
-ZCTAs_ACS_geom <- ZCTA_select %>%
-  st_drop_geometry() %>% 
-  left_join(ZCTAs_ACS, by=c("ZCTA5"="ZCTA")) %>%
-  rowwise() %>% 
-  mutate(Pop18Over = sum(c_across(Pop18to29:Pop85Over)))
+# ZCTAs_ACS_Chicago <- ZCTA_select %>%
+#   st_drop_geometry() %>% 
+#   left_join(ZCTAs_ACS, by=c("ZCTA5"="ZCTA")) %>%
+#   rowwise() %>% 
+#   mutate(Pop18Over = sum(c_across(Pop18to29:Pop85Over)))
+# write_csv(ZCTAs_ACS_Chicago,"data/ZCTAs_ACS_Chicago.csv")
 
-  
+# Join vaccine data with demographics, geometries. Create custom rates and 
 
-# Join with geometries, subset to Chicago ZCTAs
 ZCTAs_ACS_Vac_geom <- Chicago_COVID19Vaccinations_ByZCTA %>%
-  mutate(zcta = as.character(zcta)) %>%
   replace(., is.numeric(is.na(.)), "") %>%
-  left_join(ZCTAs_ACS_geom, by=c("zcta"="ZCTA5")) %>%
-  select(-pop)
+  drop_na(zcta) %>%
+  left_join(ZCTAs_ACS_Chicago, by=c("zcta"="ZCTA5")) %>%
+  filter(Total>0) %>%
+  select(-pop) %>%
+  arrange(date,zcta) %>%
+  group_by(zcta) %>%
+  mutate(rec = 1,
+         T = cumsum(rec),
+         D = if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         doses7d = rollmean(x=doses_daily, k=7, fill=0, align="right"), 
+         dosert_totalpop = doses_cum/Total*100,
+         dosert_65over = doses_cum/Pop65Over*100,
+         dosert_18over = doses_cum/Pop18Over*100,
+         dosert_16over = doses_cum/Pop16Over*100,
+         dosert_essen = doses_cum/WESSEN*100,
+         fdoses7d = rollmean(x=fdose_daily, k=7, fill=0, align="right"), 
+         fdosert_totalpop = fdose_cum/Total*100,
+         fdosert_65over = fdose_cum/Pop65Over*100,
+         fdosert_18over = fdose_cum/Pop18Over*100,
+         fdosert_16over = fdose_cum/Pop16Over*100,
+         fdosert_essen = fdose_cum/WESSEN*100,
+         sdoses7d = rollmean(x=com_daily, k=7, fill=0, align="right"), 
+         sdosert_totalpop = com_cum/Total*100,
+         sdosert_65over = com_cum/Pop65Over*100,
+         sdosert_18over = com_cum/Pop18Over*100,
+         sdosert_16over = com_cum/Pop16Over*100,
+         sdosert_essen = com_cum/WESSEN*100)
+
+ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na(zcta) %>%
+  filter(Total>0) %>%
+  arrange(pcp, date) %>%
+  group_by(pcp, date) %>%
+  summarize(rec = 1, 
+            doses_cum = sum(doses_cum),
+            Total = sum(Total)) %>%
+  mutate(Y = doses_cum/Total*100, 
+         D=if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         T = cumsum(rec))
+
+ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na() %>%
+  select(pcp, date, doses_cum, Total) %>%
+  group_by(pcp) %>%
+  summarize(rec = 1,
+            Y = sum(doses_cum)/sum(Total)*100,
+            D = if_else(date>=as.Date("2021-02-05"),1,0),
+            P = if_else(D>=1,cumsum(D),0))
+
+ZCTAs_ACS_Vac_geom %>% select(date,D,P) %>% group_by(D) %>% summarise(n())
 
 ZCTAs_ACS_Vac_geom$NotVac_totpop <- ZCTAs_ACS_Vac_geom$Total-ZCTAs_ACS_Vac_geom$fdose_cum
 ZCTAs_ACS_Vac_geom$NotVac_18over <- ZCTAs_ACS_Vac_geom$Pop18Over-ZCTAs_ACS_Vac_geom$fdose_cum
 ZCTAs_ACS_Vac_geom$NotVac_16over <- ZCTAs_ACS_Vac_geom$Pop16Over-ZCTAs_ACS_Vac_geom$fdose_cum
 ZCTAs_ACS_Vac_geom$NotVac_essen <- ZCTAs_ACS_Vac_geom$WESSEN-ZCTAs_ACS_Vac_geom$fdose_cum
 
-load("data/Data_ByZCTA_20200604.RData")
-
 # get date list from 2/1/2021 onward
 aEndDateList <- ZCTAs_ACS_Vac_geom %>% 
   group_by(date) %>% 
   summarise() %>%
   drop_na()
-aEndDateList <- aEndDateList[49:113,] # return subset of list
+aEndDateList <- aEndDateList[49:118,] # return subset of list
 aEndDateList # view date list
+
+# clear subsequent chi-square analyses
+achisqtable_All <- achisqtable_cbind
+achisqtable_All <- achisqtable_All[c(), ]
 
 # Run chi-square for all dates
 for (i in 1:nrow(aEndDateList)) {
@@ -161,8 +215,6 @@ for (i in 1:nrow(aEndDateList)) {
   achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
 }
 
-write_clip(achisqtable_All)
-
 achisqtable_All <- achisqtable_All %>% 
   rename("Vaccinated"=`rownames(achisqtable_cbind)`,
          "Expected"='achisqtable_exp',
@@ -173,9 +225,7 @@ write_clip(achisqtable_All)
 # create residual plot
 ggplot(achisqtable_All) + geom_point(aes(x=date,y=Residual, color = Vaccinated), shape=1, size = 3, stroke=2) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
 
-# run these lines before running subsequent chi-square analyses
-achisqtable_All <- achisqtable_cbind
-achisqtable_All <- achisqtable_All[c(), ]
+
 
 table(Vacs_Totpop$pcp, Vacs_Totpop$pcp)
 
@@ -221,13 +271,11 @@ Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest <- Chicago_COVID19Vaccinations_By
 st_write(Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest,"../layers/Chicago_COVID19Vaccinations_ByZCTA_GEOM_latest.shp", append=FALSE)
 write.csv(Chicago_COVID19Vaccinations_ByZCTA_Sum,"../data/vaccinationssummary_chicago.csv")
 
-
 st_write(ZCTA_select, "layers/ZCTA_select.shp", append = FALSE)
 
 ### Vaccine locations in the city -------------------------------------------
 Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
 
- {r summary statistics, bivariate correlations}
 # Create a bivariate correlation matrix for all factors.
 # If you changed factors, be sure to change names in select function.
 # Otherwise no editing required.
@@ -250,9 +298,6 @@ fviz_cluster(vulnerability.kmeans, data = VulnerabilityData_ByZCTA_naomit,
              main = "Partitioning Clustering Plot"
 )
 
-```
-
-```{r figures}
 
 delete <- Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>% 
   select(-geometry)
@@ -288,16 +333,9 @@ test <- Chicago_COVID19Vaccinations_ByZCTA_GEOM_All %>%
   # scale_color_grey() + 
   theme_bw()
 
-
-```
-
-
-```{r archive covid-19 testing and vaccination locations}
-
 adate <- as.character(Sys.Date())
 
 Chicago_COVID19TestingLocations <- read_csv(file="https://data.cityofchicago.org/api/views/thdn-3grx/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
 Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD")
 write.csv(Chicago_COVID19VaccinationLocations, paste0("../archive/Chicago_COVID19VaccinationLocations_",adate,".csv"))
 write.csv(Chicago_COVID19TestingLocations, paste0("../archive/Chicago_COVID19TestingLocations_",adate,".csv"))
-```
