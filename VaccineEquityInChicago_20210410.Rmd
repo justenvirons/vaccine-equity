@@ -1,0 +1,263 @@
+---
+title: "Vaccine Equity Analysis"
+author: "C. Scott Smith"
+date: "4/20/2021"
+output: html_document
+editor_options: 
+chunk_output_type: console
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(tidyverse)
+library(dplyr) 
+library(ggplot2)
+library(lubridate)
+library(zoo)
+library(readxl)
+library(sf)
+library(DT)
+
+```
+
+## Background
+
+### COVID-19 Burden in Chicago
+
+```{r background information and maps}
+
+adate <- as.character(Sys.Date())
+
+Chicago_COVID19TestingLocations <- read_csv(file="https://data.cityofchicago.org/api/views/thdn-3grx/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
+Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD")
+
+```
+
+### COVID-19 Burden in Chicago
+
+## Research Questions
+
+This research aims to respond to the following research questions: 
+
+(1) Are there disparities in vaccination rates across Chicago communities with different race, ethnic and socioeconomic characteristics?
+
+(2) If such disparities do exist, to what extent has Chicago's Protect Chicago Plus program mitigated them?
+
+## Methodology
+
+We employ a series of chi-square analyses to evaluate disparities in vaccination rates across communities categorized by  dominant race, ethnicity as well as COVID-19 burden. Interrupted time series analysis (ITS) is then used to evaluate the impact of the city's Protect Chicago Plus program on different measures of vaccination coverage and disparity, pre- and post-intervention.
+
+### Data
+
+To carry out the above analyses, we rely on publicly available datasets including the following:
+
+(1) socioeconomic data including race, ethnicity and age composition from the US Census Bureau's American Community Survey (ACS);
+(2) daily vaccination data from the City of Chicago's data portal; and 
+(3) information from the City of Chicago and related media reports concerning the geographic scope and rollout of the city's Protect Chicago Plus program.
+
+
+```{r import, format and summarize vaccination data from Chicago data portal}
+
+# Download daily vaccination data by zip code from Chicago data portal
+Chicago_COVID19Vaccinations_ByZCTA <- read_csv(file="https://data.cityofchicago.org/api/views/553k-3xzc/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
+
+# Rename columns, reformat date, create week field
+Chicago_COVID19Vaccinations_ByZCTA <- Chicago_COVID19Vaccinations_ByZCTA %>% 
+  rename("zcta"="Zip Code", 
+         "date"="Date", 
+         "doses_daily"="Total Doses - Daily", 
+         "doses_cum"="Total Doses - Cumulative", 
+         "fdose_daily"="1st Dose - Daily", 
+         "fdose_cum"="1st Dose - Cumulative", 
+         "fdose_pctpop"="1st Dose - Percent Population", 
+         "com_daily"="Vaccine Series Completed - Daily", 
+         "com_cum"="Vaccine Series Completed - Cumulative", 
+         "com_pctpop"="Vaccine Series Completed  - Percent Population", 
+         "pop"="Population", 
+         "geometry"="ZIP Code Location") %>%
+  select(-geometry) %>%
+  mutate(date = as.Date(date, "%m/%d/%Y"),
+         ymw = ceiling_date(date, "week"))
+
+# Summarize by date
+Chicago_COVID19Vaccinations_ByDate_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  filter(pop>0) %>% 
+  group_by(date) %>% 
+  arrange(date) %>% 
+  summarise(doses = sum(doses_daily), 
+            dosescm = sum(doses_cum), 
+            fdoses = sum(fdose_daily),
+            fdosescm = sum(fdose_cum), 
+            sdoses = sum(com_daily), 
+            sdosescm = sum(com_cum)) %>%
+  slice(1:20) %>%
+  datatable()
+
+# Summarize by ZCTA
+Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  filter(pop>0) %>% 
+  group_by(zcta) %>% 
+  summarise(doses = sum(doses_daily), 
+            dosescm = sum(doses_cum), 
+            fdoses = sum(fdose_daily),
+            fdosescm = sum(fdose_cum), 
+            sdoses = sum(com_daily), 
+            sdosescm = sum(com_cum)) %>%
+  mutate(ZCTA5=as.character(zcta))
+
+```
+
+``` {r Table}
+Chicago_COVID19Vaccinations_ByDate_Sum
+```
+
+```{r import demographic data, calculate and summarize vaccination rates}
+
+# Import previously downloaded 2019 ACS 5-year estimates demographic data by
+# ZCTA
+
+ZCTAs_ACS_Chicago <- read_csv("data/ZCTAs_ACS_Chicago.csv")
+
+ZCTAs_ACS_Vac_geom <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  replace(., is.numeric(is.na(.)), "") %>%
+  drop_na(zcta) %>%
+  mutate(zcta = as.numeric(zcta)) %>%
+  left_join(ZCTAs_ACS_Chicago, by=c("zcta"="ZCTA5")) %>%
+  filter(Total>0) %>%
+  select(-pop) %>%
+  arrange(date,zcta) %>%
+  group_by(zcta) %>%
+  mutate(rec = 1,
+         T = cumsum(rec),
+         D = if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         doses7d = rollmean(x=doses_daily, k=7, fill=0, align="right"), 
+         dosert_totalpop = doses_cum/Total*100,
+         dosert_65over = doses_cum/Pop65Over*100,
+         dosert_18over = doses_cum/Pop18Over*100,
+         dosert_16over = doses_cum/Pop16Over*100,
+         dosert_essen = doses_cum/WESSEN*100,
+         fdoses7d = rollmean(x=fdose_daily, k=7, fill=0, align="right"), 
+         fdosert_totalpop = fdose_cum/Total*100,
+         fdosert_65over = fdose_cum/Pop65Over*100,
+         fdosert_18over = fdose_cum/Pop18Over*100,
+         fdosert_16over = fdose_cum/Pop16Over*100,
+         fdosert_essen = fdose_cum/WESSEN*100,
+         sdoses7d = rollmean(x=com_daily, k=7, fill=0, align="right"), 
+         sdosert_totalpop = com_cum/Total*100,
+         sdosert_65over = com_cum/Pop65Over*100,
+         sdosert_18over = com_cum/Pop18Over*100,
+         sdosert_16over = com_cum/Pop16Over*100,
+         sdosert_essen = com_cum/WESSEN*100)
+
+```
+
+``` {r format, summarize data for chi-square analysis}
+
+# get date list from 2/1/2021 onward
+aEndDateList <- ZCTAs_ACS_Vac_geom %>% 
+  group_by(date) %>% 
+  summarise() %>%
+  drop_na()
+aEndDateList <- aEndDateList[49:118,] # return subset of list
+aEndDateList # view date list
+
+ZCTA_select = st_read("layers/ZCTA_select.shp")
+achisqtable_All <- readRDS("data/achisqtable_All.rds")
+achisqtable_All <- achisqtable_All[c(), ]
+
+ZCTAs_ACS_Vac_geom$NotVac_totpop <- ZCTAs_ACS_Vac_geom$Total-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_18over <- ZCTAs_ACS_Vac_geom$Pop18Over-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_16over <- ZCTAs_ACS_Vac_geom$Pop16Over-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_essen <- ZCTAs_ACS_Vac_geom$WESSEN-ZCTAs_ACS_Vac_geom$fdose_cum
+
+# Run chi-square for all dates
+for (i in 1:nrow(aEndDateList)) {
+  ct_CountsbyCategory <- ZCTAs_ACS_Vac_geom %>%
+    filter(date == aEndDateList$date[i]) %>%
+    group_by(pcp) %>%
+    drop_na() %>%
+    summarize(Vaccinated = sum(fdose_cum),
+              # NotVaccinated = sum(NotVac_totpop))
+              NotVaccinated = sum(NotVac_18over))
+  
+  ct_CountsbyCategory[is.na(ct_CountsbyCategory)] <- 0
+  ct_CountsbyCategory_t <- t(ct_CountsbyCategory[,-1])
+  colnames(ct_CountsbyCategory_t) <- ct_CountsbyCategory$pcp
+  
+  chisq_Results <- chisq.test(ct_CountsbyCategory_t)
+  achisqtable_obs <-  chisq_Results$observed
+  achisqtable_exp <- round(chisq_Results$expected,2)
+  achisqtable_exp <- achisqtable_exp[1,]
+  achisqtable_obs <- achisqtable_obs[1,]
+  achisqtable_cbind <- cbind(achisqtable_exp,achisqtable_obs)
+  achisqtable_cbind <- as.data.frame.matrix(achisqtable_cbind)
+  achisqtable_cbind$date <- aEndDateList$date[i]
+  achisqtable_cbind$PValue <- chisq_Results$p.value
+  achisqtable_cbind$XSqrd <- chisq_Results$statistic
+  achisqtable_cbind$df <- chisq_Results$parameter
+  achisqtable_cbind <- cbind(rownames(achisqtable_cbind), data.frame(achisqtable_cbind, row.names=NULL))
+  achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
+}
+
+achisqtable_All <- achisqtable_All %>% 
+  rename("Vaccinated"=`rownames(achisqtable_cbind)`,
+         "Expected"='achisqtable_exp',
+         "Observed"='achisqtable_obs')
+
+achisqtable_All$Residual <- achisqtable_All$Observed - achisqtable_All$Expected
+
+
+# create residual plot
+ggplot(achisqtable_All) + geom_point(aes(x=date,y=Residual, color = Vaccinated), shape=1, size = 3, stroke=2) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
+
+# clear subsequent chi-square analyses
+achisqtable_All <- readRDS("data/achisqtable_All.rds")
+achisqtable_All <- achisqtable_All[c(), ]
+
+
+```
+
+
+``` {r format, summarize data for interrupted time series analysis}
+
+ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na(zcta) %>%
+  filter(Total>0) %>%
+  arrange(pcp, date) %>%
+  group_by(pcp, date) %>%
+  summarize(rec = 1, 
+            doses_cum = sum(doses_cum),
+            Total = sum(Total)) %>%
+  mutate(Y = doses_cum/Total*100, 
+         D=if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         T = cumsum(rec))
+
+ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na() %>%
+  select(pcp, date, doses_cum, Total) %>%
+  group_by(pcp) %>%
+  summarize(rec = 1,
+            Y = sum(doses_cum)/sum(Total)*100,
+            D = if_else(date>=as.Date("2021-02-05"),1,0),
+            P = if_else(D>=1,cumsum(D),0))
+
+ZCTAs_ACS_Vac_geom %>% select(date,D,P) %>% group_by(D) %>% summarise(n())
+
+```
+
+## Resources
+
+https://ds4ps.org/pe4ps-textbook/docs/p-020-time-series.html
+https://ds4ps.org/pe4ps-textbook/docs/p-020-time-series.html
+https://online.stat.psu.edu/stat462/node/188/
+https://www-sciencedirect-com.ezproxy.depaul.edu/science/article/pii/S0277953602005026
+https://worldwidescience.org/topicpages/v/vaccination+odds+ratio.html
+https://www.quora.com/What-is-an-equivalent-of-the-chi-square-test-for-time-series-data
