@@ -100,8 +100,6 @@ Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
             sdosescm = sum(com_cum)) %>%
   mutate(ZCTA5=as.character(zcta))
 
-# Import previously downloaded 2019 demographic data by ZCTA
-ZCTAs_ACS_Chicago <- read_csv("data/ZCTAs_ACS_Chicago.csv")
 
 #   mutate(ZCTA=as.character(ZCTA))
 # Join with geometries, subset to Chicago ZCTAs
@@ -181,49 +179,6 @@ aEndDateList <- ZCTAs_ACS_Vac_geom %>%
   drop_na()
 aEndDateList <- aEndDateList[49:118,] # return subset of list
 aEndDateList # view date list
-
-# clear subsequent chi-square analyses
-achisqtable_All <- achisqtable_cbind
-achisqtable_All <- achisqtable_All[c(), ]
-
-# Run chi-square for all dates
-for (i in 1:nrow(aEndDateList)) {
-  ct_CountsbyCategory <- ZCTAs_ACS_Vac_geom %>%
-    filter(date == aEndDateList$date[i]) %>%
-    group_by(pcp) %>%
-    drop_na() %>%
-    summarize(Vaccinated = sum(fdose_cum),
-              # NotVaccinated = sum(NotVac_totpop))
-              NotVaccinated = sum(NotVac_18over))
-  
-  ct_CountsbyCategory[is.na(ct_CountsbyCategory)] <- 0
-  ct_CountsbyCategory_t <- t(ct_CountsbyCategory[,-1])
-  colnames(ct_CountsbyCategory_t) <- ct_CountsbyCategory$pcp
-  
-  chisq_Results <- chisq.test(ct_CountsbyCategory_t)
-  achisqtable_obs <-  chisq_Results$observed
-  achisqtable_exp <- round(chisq_Results$expected,2)
-  achisqtable_exp <- achisqtable_exp[1,]
-  achisqtable_obs <- achisqtable_obs[1,]
-  achisqtable_cbind <- cbind(achisqtable_exp,achisqtable_obs)
-  achisqtable_cbind <- as.data.frame.matrix(achisqtable_cbind)
-  achisqtable_cbind$date <- aEndDateList$date[i]
-  achisqtable_cbind$PValue <- chisq_Results$p.value
-  achisqtable_cbind$XSqrd <- chisq_Results$statistic
-  achisqtable_cbind$df <- chisq_Results$parameter
-  achisqtable_cbind <- cbind(rownames(achisqtable_cbind), data.frame(achisqtable_cbind, row.names=NULL))
-  achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
-}
-
-achisqtable_All <- achisqtable_All %>% 
-  rename("Vaccinated"=`rownames(achisqtable_cbind)`,
-         "Expected"='achisqtable_exp',
-         "Observed"='achisqtable_obs')
-achisqtable_All$Residual <- achisqtable_All$Observed - achisqtable_All$Expected
-write_clip(achisqtable_All)
-
-# create residual plot
-ggplot(achisqtable_All) + geom_point(aes(x=date,y=Residual, color = Vaccinated), shape=1, size = 3, stroke=2) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
 
 
 

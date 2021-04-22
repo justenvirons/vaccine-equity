@@ -1,11 +1,11 @@
 ---
-title: "Vaccine Equity Analysis"
-author: "C. Scott Smith"
-date: "4/20/2021"
-output: html_document
+title: "COVID-19 Vaccine Equity Analysis (DRAFT)"
+author: "Amy Johnson, PhD | C. Scott Smith, PhD AICP"
+date: "Last updated 4/21/2021"
+output: bookdown::word_document2
+tidy: styler
 editor_options: 
 chunk_output_type: console
-
 ---
 
 ```{r setup, include=FALSE}
@@ -22,47 +22,16 @@ library(ggplot2)
 library(lubridate)
 library(zoo)
 library(readxl)
+library(xtable)
+library(kableExtra)
 library(sf)
-library(DT)
+library(stargazer) 
 
 ```
 
-## Background
-### COVID-19 Burden in Chicago
-
-```{r background information and maps}
+```{r import-vaccination-data}
 
 adate <- as.character(Sys.Date())
-
-Chicago_COVID19TestingLocations <- read_csv(file="https://data.cityofchicago.org/api/views/thdn-3grx/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
-Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD")
-
-```
-
-### COVID-19 Burden in Chicago
-
-## Research Questions
-
-This research aims to respond to the following research questions: 
-
-(1) Are there disparities in vaccination rates across Chicago communities with different race, ethnic and socioeconomic characteristics?
-
-(2) If such disparities do exist, to what extent has Chicago's Protect Chicago Plus program mitigated them?
-
-## Methodology
-
-We employ a series of chi-square analyses to evaluate disparities in vaccination rates across communities categorized by  dominant race, ethnicity as well as COVID-19 burden. Interrupted time series analysis (ITS) is then used to evaluate the impact of the city's Protect Chicago Plus program on different measures of vaccination coverage and disparity, pre- and post-intervention.
-
-### Data
-
-To carry out the above analyses, we rely on publicly available datasets including the following:
-
-(1) socioeconomic data including race, ethnicity and age composition from the US Census Bureau's American Community Survey (ACS);
-(2) daily vaccination data from the City of Chicago's data portal; and 
-(3) information from the City of Chicago and related media reports concerning the geographic scope and rollout of the city's Protect Chicago Plus program.
-
-
-```{r import, format and summarize vaccination data from Chicago data portal}
 
 # Download daily vaccination data by zip code from Chicago data portal
 Chicago_COVID19Vaccinations_ByZCTA <- read_csv(file="https://data.cityofchicago.org/api/views/553k-3xzc/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
@@ -95,9 +64,7 @@ Chicago_COVID19Vaccinations_ByDate_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
             fdoses = sum(fdose_daily),
             fdosescm = sum(fdose_cum), 
             sdoses = sum(com_daily), 
-            sdosescm = sum(com_cum)) %>%
-  slice(1:20) %>%
-  datatable()
+            sdosescm = sum(com_cum))
 
 # Summarize by ZCTA
 Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
@@ -113,11 +80,7 @@ Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
 
 ```
 
-``` {r Table}
-Chicago_COVID19Vaccinations_ByDate_Sum
-```
-
-```{r import demographic data, calculate and summarize vaccination rates}
+```{r import-demographic-data}
 
 # Import previously downloaded 2019 ACS 5-year estimates demographic data by
 # ZCTA
@@ -158,17 +121,113 @@ ZCTAs_ACS_Vac_geom <- Chicago_COVID19Vaccinations_ByZCTA %>%
 
 ```
 
-``` {r format, summarize data for chi-square analysis}
+# Background
 
-# get date list from 2/1/2021 onward
+The illness caused by Severe Acute Respiratory Syndrome Coronavirus-2 (SARS-CoV-2), coronavirus disease (COVID-19), was declared a pandemic by the World Health Organization in March 2020. In absence of a cure and natural immunity, more than 500,000 Americans have died of COVID-19 and far more have been impacted by the disease.
+
+However, the distribution of the disease is not uniform across the American population, but rather the burden of COVID-19 has disproportionately impacted racial and ethnic minorities demonstrating the effects of social determinants of health, neighborhood traits, and the distribution of underlying comorbidities [ADD CITATIONS]. Racial/ethnic minority populations in urban settings are often employed in service occupations that prevent work-from-home and physical distancing. Further, crowded, multi-generational households, older housing stock, and substandard air quality also contribute to the increased rates of COVID-19 among racial/ethnic minority communities. Finally, racial/ethnic minority populations experience a disproportionate burden of comorbidities that impact the severity of COVID-19 (e.g., diabetes, cardiovascular disease, asthma, obesity). Identifying characteristics that are associated with increased COVID-19 risk, even if they are not causally related, can assist in prioritizing communities with high need for testing and vaccination to mitigate the continued impact of COVID-19.
+
+According to the DePaul University Chicago COVID-19 Community Health Equity dashboard which sources data from local reporting, the city of Chicago has recorded 244,230 positive COVID-19 cases from March 13, 2020 through April 21, 2021 resulting in 4,984 deaths. Despite representing 29% and 28.8% of the city's total population, Black and Latinx populations represented 38.5% and 33.4% of deaths from COVID-19 respectively. Two highly effective COVID-19 vaccines were approved for emergency use in the United States in December 2020 and a third... As COVID-19 vaccination is one of the best strategies to control spread and reduce morbidity and mortality, rapid and equitable dissemination is required. Public health officials need to plan strategically to prioritize the allocation of vaccine to the groups most in need including those disproportionately impacted by COVID-19.
+
+## COVID-19 Burden in Chicago
+
+```{r background-maps}
+
+Chicago_COVID19TestingLocations <- read_csv(file="https://data.cityofchicago.org/api/views/thdn-3grx/rows.csv?accessType=DOWNLOAD&bom=true&format=true")
+Chicago_COVID19VaccinationLocations <- read_csv(file="https://data.cityofchicago.org/api/views/6q3z-9maq/rows.csv?accessType=DOWNLOAD")
+
+```
+
+The Chicago COVID-19 Community Vulnerability Index (CCVI) was adapted and modified based on the CDC Social Vulnerability Index. The Chicago CCVI identifies communities that are uniquely vulnerable to barriers to COVID-19 vaccine uptake via a ranking of a combination of ten components (risk factors and COVID-19 burden) that are synthesized into a single composite score. Community areas that received high CCVI scores had the highest mobility during COVID-19, low socioeconomic status, high rates of COVID-19 hospital admission, and high rates of COVID-19 mortality. Fifteen community areas in Chicago made up the top quintile and corresponded to 7 majority Latinx and 8 majority Black community areas. As COVID-19 vaccines are in limited supply, allocation with a focus on communities most impacted is imperative for equitable and effective control.
+
+On January 25, 2021, Chicago Mayor Lori Lightfoot and the Chicago Department of Public Health announced its Protect Chicago Plus (PCP) vaccination program, which is designed to ensure equitable vaccine access for communities that experienced the highest CCVI. The plan identified 15 high-need communities which ranked highest according to the city's CCVI, increasing vaccine allocation in these areas and expanding eligibility to all residents 18 and over. The leveraged community stakeholders to reduce barriers to vaccine access via call-in lines, strike teams, mobile clinics, homebound distribution and other strategies to improve vaccine availability and acceptability.
+
+## Research Questions
+
+This study provides an overview of Chicago's COVID-19 vaccine distribution over a four-month period with a particular focus on evaluating whether or not improvements were made in the uptake of vaccine among the city's most vulnerable populations after implementation of its targeted distribution plan. Specifically, this research aims to respond to two research questions:
+
+(1) How do first-dose COVID-19 vaccination administrations differ across Chicago communities with different race, ethnic, socioeconomic and CCVI characteristics?
+
+(2) To what extent have vaccination distribution strategies mitigated disparities in vaccination rates, especially in neighborhoods targeted in the city's Protect Chicago Plus program?
+
+# Methodology
+
+A series of chi-square analyses were employed to evaluate disparities in vaccination rates across communities categorized by dominant race and ethnic group, poverty status and relative CCVI. Multiple interrupted time series analyses (ITS) were then implemented to evaluate the impact of the city's PCP program on different measures of vaccination coverage and disparity, pre- and post-intervention. ITS was the preferred analytic framework because it required fewer controls, allowing for general inferences to be made about intervention efficacy with two independent variables - time and program start date.
+
+## Data
+
+To carry out the above analyses, we rely on publicly available data including:
+
+(1) socioeconomic data including race, ethnicity, socioeconomic status and age composition from the US Census Bureau's American Community Survey (ACS), 2015 to 2019 5-year estimates;
+
+(2) daily first dose COVID-19 vaccination counts from the City of Chicago's data portal; and
+
+(3) press releases from the City of Chicago and related media reports concerning the geographic scope, roll-out and overall implementation of the city's Protect Chicago Plus vaccination program.
+
+### COVID-19 Vaccination Disparities in Chicago
+
+```{r vaccinations-by-race}
+ZCTAs_ACS_Vac_geom %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  select(RMAXCAT,
+         fdose_cum,
+         Pop18Over) %>%
+    group_by("Dominant Group"=RMAXCAT) %>%
+    summarize("First Doses" = format(sum(fdose_cum),scientific=FALSE,big.mark=","),
+              "Pop 18+" = format(sum(Pop18Over),scientific=FALSE,big.mark=","),
+              "First Dose Rate (%)" = signif(sum(fdose_cum)/sum(Pop18Over)*100,3)) %>%
+  knitr::kable(booktabs = TRUE, caption="First Dose COVID-19 Vaccination Rates by Dominant Community Race and Ethnic Group, 12/15/2020 to 4/19/2021")
+```
+
+```{r vaccinations-by-poverty}
+ZCTAs_ACS_Vac_geom %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  select(PCTBPOV,
+         fdose_cum,
+         Pop18Over) %>%
+  arrange(PCTBPOV) %>%
+    mutate(PCTBPOV_q=ntile(PCTBPOV,5)) %>%
+    group_by("Poverty Quintile"=PCTBPOV_q) %>%
+    summarize("Mean Poverty Rate" = signif(mean(PCTBPOV),3),
+              "First Doses" = format(sum(fdose_cum),scientific=FALSE,big.mark=","),
+              "Pop 18+" = format(sum(Pop18Over),scientific=FALSE,big.mark=","),
+              "First Dose Rate (%)" = signif(sum(fdose_cum)/sum(Pop18Over)*100,3)) %>%
+  knitr::kable(booktabs = TRUE, caption="First Dose COVID-19 Vaccination Rates by Poverty Rate Quintile, 12/15/2020 to 4/19/2021")
+```
+
+```{r vaccinations-by-pcp}
+ZCTAs_ACS_Vac_geom %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  select(pcp,
+         fdose_cum,
+         Pop18Over) %>%
+    group_by("PCP Neighborhood"=pcp) %>%
+    summarize("First Doses" = format(sum(fdose_cum),scientific=FALSE,big.mark=","),
+              "Pop 18+" = format(sum(Pop18Over),scientific=FALSE,big.mark=","),
+              "First Dose Rate (%)" = signif(sum(fdose_cum)/sum(Pop18Over)*100,3)) %>%
+  knitr::kable(booktabs = TRUE, caption="First Dose COVID-19 Vaccination Rates by PCP Community Category, 12/15/2020 to 4/19/2021")
+```
+
+## Analysis
+
+Two-way contingency tables were created to represent daily cumulative first dose COVID-19 vaccination coverage rates by zip code category from December 29, 2020 (two weeks after the first COVID-19 vaccination dose was administered in the city) to April 19, 2021. Zip codes were categorized, "yes" and "no", by whether they were or were not targeted in the city's PCP program.
+
+For each contingency table, a Pearson chi-squared test was carried out to detect statistically significant differences between vaccination coverage rates across the two categories of communities; with the null hypotheses being that no association exists. Each of these tests yielded a significant p-value, indicating that PCP participation and corresponding vaccination rates are associated throughout the entire study period although variations in the magnitude of these associations change over time.
+
+Figure 1 plots both the standardized and non-standardized residuals from the chi-square tests. Values positioned above the horizontal axis (i.e., greater than 0) indicate vaccination rates that are significantly greater than would be expected if the null hypothesis were true, whereas values positioned below the horizontal axis indicate rates that are significantly lower than would be expected. The plot clearly shows that, when evaluated collectively, communities that rank highest with respect to COVID-19 vulnerability, also underperform with respect to COVID-19 vaccination coverage. However, this gap narrowed in early February (indicated with black vertical line) after the initial roll-out of the PCP vaccination program before widening again in late March as vaccine eligibility expanded to the broader population.
+
+```{r chi-square-analysis, fig.cap="Standardized and Non-Standardized Residuals of Chi-Square Analyses Comparing Daily Cumulative First Dose COVID-19 Vaccination Counts for Communities Inside (YES) and Outside (NO) PCP Target Area"}
+
+# get date list from 1/15/2021 onward
 aEndDateList <- ZCTAs_ACS_Vac_geom %>% 
   group_by(date) %>% 
   summarise() %>%
   drop_na()
-aEndDateList <- aEndDateList[49:118,] # return subset of list
-aEndDateList # view date list
 
-ZCTA_select = st_read("layers/ZCTA_select.shp")
+aEndDateList <- aEndDateList[15:126,] # return subset of list
 achisqtable_All <- readRDS("data/achisqtable_All.rds")
 achisqtable_All <- achisqtable_All[c(), ]
 
@@ -190,7 +249,6 @@ for (i in 1:nrow(aEndDateList)) {
   ct_CountsbyCategory[is.na(ct_CountsbyCategory)] <- 0
   ct_CountsbyCategory_t <- t(ct_CountsbyCategory[,-1])
   colnames(ct_CountsbyCategory_t) <- ct_CountsbyCategory$pcp
-  
   chisq_Results <- chisq.test(ct_CountsbyCategory_t)
   achisqtable_obs <-  chisq_Results$observed
   achisqtable_exp <- round(chisq_Results$expected,2)
@@ -198,9 +256,19 @@ for (i in 1:nrow(aEndDateList)) {
   achisqtable_obs <- achisqtable_obs[1,]
   achisqtable_cbind <- cbind(achisqtable_exp,achisqtable_obs)
   achisqtable_cbind <- as.data.frame.matrix(achisqtable_cbind)
+  
   achisqtable_cbind$date <- aEndDateList$date[i]
   achisqtable_cbind$PValue <- chisq_Results$p.value
   achisqtable_cbind$XSqrd <- chisq_Results$statistic
+  
+  achisqtable_res <- round(chisq_Results$residuals,3)
+  achisqtable_stdres <- round(chisq_Results$stdres,3)
+  achisqtable_res <- achisqtable_res[1,]
+  achisqtable_stdres <- achisqtable_stdres[1,]
+  achisqtable_cbind_res <- cbind(achisqtable_res,achisqtable_stdres)
+  achisqtable_cbind_res <- as.data.frame.matrix(achisqtable_cbind_res)
+  achisqtable_cbind <- cbind(achisqtable_cbind,achisqtable_cbind_res)
+  
   achisqtable_cbind$df <- chisq_Results$parameter
   achisqtable_cbind <- cbind(rownames(achisqtable_cbind), data.frame(achisqtable_cbind, row.names=NULL))
   achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
@@ -208,24 +276,21 @@ for (i in 1:nrow(aEndDateList)) {
 
 achisqtable_All <- achisqtable_All %>% 
   rename("Vaccinated"=`rownames(achisqtable_cbind)`,
-         "Expected"='achisqtable_exp',
-         "Observed"='achisqtable_obs')
-
-achisqtable_All$Residual <- achisqtable_All$Observed - achisqtable_All$Expected
-
+         "Residual"=achisqtable_res,
+         "StdResidual"=achisqtable_stdres,
+         "Expected"=achisqtable_exp,
+         "Observed"=achisqtable_obs)
 
 # create residual plot
-ggplot(achisqtable_All) + geom_point(aes(x=date,y=Residual, color = Vaccinated), shape=1, size = 3, stroke=2) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1.5) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), text = element_text(family="arial", face="bold", size=18), axis.text.x = element_text(angle = 90)) 
+
+ggplot(achisqtable_All) + geom_point(aes(x=date,y=StdResidual, color=Vaccinated), shape=1, size = 1, stroke=0.5) + geom_line(aes(x=date,y=Residual, color = Vaccinated), size=1) + scale_color_manual(values=c('#A6758D','#8DB1D5','#FFC000','#FBA2A2')) + theme(legend.position="top", legend.title = element_blank(), axis.title.x = element_blank(), legend.key=element_blank(), axis.ticks=element_line(size=1), axis.text.x = element_text(angle = 90)) + geom_vline(xintercept = as.Date("2021-02-05"))
 
 # clear subsequent chi-square analyses
-achisqtable_All <- readRDS("data/achisqtable_All.rds")
+achisqtable_All <- read_rds(file= "data/achisqtable_All.rds")
 achisqtable_All <- achisqtable_All[c(), ]
-
-
 ```
 
-
-``` {r format, summarize data for interrupted time series analysis}
+```{r ITS-plot_pcp, fig.cap="Interrupted Time Series (ITS) Analysis of Cumulative First-Dose COVID-19 Vaccination Rates, Pre- and Post-Rollout of the Protect Chicago Plus Program by Community Category"}
 
 ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
   drop_na(zcta) %>%
@@ -240,24 +305,93 @@ ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
          P = if_else(D>=1,cumsum(D),0),
          T = cumsum(rec))
 
-ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
-  drop_na() %>%
-  select(pcp, date, doses_cum, Total) %>%
-  group_by(pcp) %>%
-  summarize(rec = 1,
-            Y = sum(doses_cum)/sum(Total)*100,
-            D = if_else(date>=as.Date("2021-02-05"),1,0),
-            P = if_else(D>=1,cumsum(D),0))
+dataTS <- ZCTAs_ACS_Vac_ByPCP_geom %>%
+  select(pcp, 
+         date,
+         T,
+         D,
+         P,
+         Y)
 
-ZCTAs_ACS_Vac_geom %>% select(date,D,P) %>% group_by(D) %>% summarise(n())
+plot( dataTS$T, dataTS$Y,
+      bty="n", pch=19, col="gray",
+      ylim = c(0, 100), xlim=c(0,120),
+      xlab = "Time (days)", 
+      ylab = "First Dose Vaccination Rate (%)" )
+
+# Line marking the interruption
+abline( v=53, col="firebrick", lty=2 )
+text( 5, 100, "Pre-Intervention", col="firebrick", cex=1.3, pos=4 )
+text( 65, 100, "Post-Intervention", col="firebrick", cex=1.3, pos=4 )
+
+# Add the regression line
+ts_no <- lm( Y ~ T + D + P, data=dataTS %>% filter(pcp=="NO") )
+dataTS_No <- dataTS %>% select(T,pcp) %>% filter(pcp=="NO")
+lines(dataTS_No$T, ts_no$fitted.values, col="black", lwd=2 )
+
+ts_yes <- lm( Y ~ T + D + P, data=dataTS %>% filter(pcp=="YES") )
+dataTS_Yes <- dataTS %>% select(T,pcp) %>% filter(pcp=="YES")
+lines(dataTS_Yes$T, ts_yes$fitted.values, col="black", lty=2 )
 
 ```
 
-## Resources
+```{r ITS-regression_pcpno, results='asis', fig.cap = "ITS Regression Results for PCP (NO) Category Communities"}
 
-https://ds4ps.org/pe4ps-textbook/docs/p-020-time-series.html
-https://ds4ps.org/pe4ps-textbook/docs/p-020-time-series.html
-https://online.stat.psu.edu/stat462/node/188/
-https://www-sciencedirect-com.ezproxy.depaul.edu/science/article/pii/S0277953602005026
-https://worldwidescience.org/topicpages/v/vaccination+odds+ratio.html
-https://www.quora.com/What-is-an-equivalent-of-the-chi-square-test-for-time-series-data
+stargazer( ts_no, 
+           header=FALSE,
+           type = "latex", 
+           dep.var.labels = ("COVID-19 First Vaccination Rate"),
+           column.labels = ("Model results"),
+           covariate.labels = c("Time", "PCP", 
+                                "Time Since PCP"),
+           omit.stat = "all", 
+           digits = 2 ) 
+
+
+```
+
+
+```{r ITS-plot_pcp_zipspecific, fig.cap="Interrupted Time Series (ITS) Analysis of Cumulative First-Dose COVID-19 Vaccination Rates, Pre- and Post-Rollout of the Protect Chicago Plus Program by Community Category"}
+
+ZCTAs_ACS_Vac_ByPCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na(zcta) %>%
+  filter(Total>0) %>%
+  arrange(pcp, date) %>%
+  group_by(pcp, date) %>%
+  summarize(rec = 1, 
+            doses_cum = sum(doses_cum),
+            Total = sum(Total)) %>%
+  mutate(Y = doses_cum/Total*100, 
+         D=if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         T = cumsum(rec))
+
+dataTS <- ZCTAs_ACS_Vac_ByPCP_geom %>%
+  select(pcp, 
+         date,
+         T,
+         D,
+         P,
+         Y)
+
+plot( dataTS$T, dataTS$Y,
+      bty="n", pch=19, col="gray",
+      ylim = c(0, 100), xlim=c(0,120),
+      xlab = "Time (days)", 
+      ylab = "First Dose Vaccination Rate (%)" )
+
+# Line marking the interruption
+abline( v=53, col="firebrick", lty=2 )
+text( 5, 100, "Pre-Intervention", col="firebrick", cex=1.3, pos=4 )
+text( 65, 100, "Post-Intervention", col="firebrick", cex=1.3, pos=4 )
+
+# Add the regression line
+ts_no <- lm( Y ~ T + D + P, data=dataTS %>% filter(pcp=="NO"))
+dataTS_No <- dataTS %>% select(T,pcp) %>% filter(pcp=="NO")
+lines(dataTS_No$T, ts_no$fitted.values, col="black", lwd=2 )
+
+ts_yes <- lm( Y ~ T + D + P, data=dataTS %>% filter(pcp=="YES"))
+dataTS_Yes <- dataTS %>% select(T,pcp) %>% filter(pcp=="YES")
+lines(dataTS_Yes$T, ts_yes$fitted.values, col="black", lty=2 )
+
+```

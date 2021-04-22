@@ -26,10 +26,10 @@ aplot <- dataTS %>%
   aes(x=T, y=Y, color=zcta) +
   geom_point()
 
-ggplotly(aplot)
+aplot
 
 library(ggplot2)
-ggplotly( dataTS$T, dataTS$Y,
+ggplot(dataTS$T, dataTS$Y,
       bty="n", pch=19, col="gray",
       ylim = c(0, 100), xlim=c(0,120),
       xlab = "Time (days)", 
