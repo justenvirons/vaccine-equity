@@ -34,23 +34,28 @@ library(readxl)
 ZCTA_select = st_read("layers/ZCTA_select.shp")
 achisqtable_All <- readRDS("data/achisqtable_All.rds")
 
+delete <- ZCTA_select %>%
+  st_drop_geometry()
+
+write_clip(delete)
+
 # Flag zip codes participating in Protect Chicago Plus program ------------
 # https://www.accessliving.org/newsroom/action-alerts/updates-from-access-living-protect-chicago-plus-vaccine-program-al-town-hall-recordings-posted/
 
 # ZCTA_select <- ZCTA_select %>% 
 #   mutate(pcp = ifelse(
 #     ZCTA5=="60636" | 
-#       ZCTA5=="60609" | 
+#       ZCTA5=="60609" | x
 #       ZCTA5=="60632" | 
-#       ZCTA5=="60623" |
-#       ZCTA5=="60629" |
-#       ZCTA5=="60621" |
-#       ZCTA5=="60628" |
-#       ZCTA5=="60632" |
-#       ZCTA5=="60620" |
-#       ZCTA5=="60644" |
-#       ZCTA5=="60639" |
-#       ZCTA5=="60617", 
+#       ZCTA5=="60623" |s
+#       ZCTA5=="60629" |s
+#       ZCTA5=="60621" |s
+#       ZCTA5=="60628" |a
+#       ZCTA5=="60632" |s
+#       ZCTA5=="60620" |x
+#       ZCTA5=="60644" |s
+#       ZCTA5=="60639" |s
+#       ZCTA5=="60617", x
 #     "YES", "NO")) %>%
 #   select(ZCTA5,pcp)
 

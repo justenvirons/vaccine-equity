@@ -1,0 +1,547 @@
+---
+title: "_Protect Chicago Plus_: Evaluation of a City-wide COVID-19 Vaccine Equity Plan"
+author: "Amy K. Johnson^1-2^, C. Scott Smith^3-4,\\*^, Bijou Hunt^5-6^, Jackie Jacobs^7, Pamela Roesh^7"
+date: "^1^Division of Young Adult and Adolescent Medicine, Ann & Robert H. Lurie Children’s Hospital of Chicago"
+output: bookdown::word_document2
+bibliography: references.bib
+csl: jama.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(rbbt)
+library(bookdown)
+library(tidyverse)
+library(dplyr) 
+library(ggplot2)
+library(lubridate)
+library(zoo)
+library(readxl)
+library(xtable)
+library(kableExtra)
+library(sf)
+library(clipr)
+library(ggsci)
+library(jtools)
+
+```
+
+```{r import-covidcasedeathtesting-data}
+
+Chicago_COVID19CasesDeathsTests_ByZCTA <- read_csv(file="../data/Chicago_COVID19CaseDeathsTests_ByZCTA.csv")
+
+```
+
+```{r import-covidvaccination-data}
+# Download daily vaccination data by zip code from Chicago data portal
+Chicago_COVID19Vaccinations_ByZCTA <- read_csv(file="../data/Chicago_COVID19Vaccinations_ByZCTA.csv")
+
+# Summarize by date
+Chicago_COVID19Vaccinations_ByDate_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  filter(pop>0) %>% 
+  group_by(date) %>% 
+  arrange(date) %>% 
+  summarise(doses = sum(doses_daily), 
+            dosescm = sum(doses_cum), 
+            fdoses = sum(fdose_daily),
+            fdosescm = sum(fdose_cum), 
+            sdoses = sum(com_daily), 
+            sdosescm = sum(com_cum))
+
+# Summarize by ZCTA
+Chicago_COVID19Vaccinations_ByZCTA_Sum <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  filter(pop>0) %>% 
+  group_by(zcta) %>% 
+  summarise(doses = sum(doses_daily), 
+            dosescm = sum(doses_cum), 
+            fdoses = sum(fdose_daily),
+            fdosescm = sum(fdose_cum), 
+            sdoses = sum(com_daily), 
+            sdosescm = sum(com_cum)) %>%
+  mutate(ZCTA5=as.character(zcta))
+
+```
+
+```{r import-demographic-data}
+
+# Import previously downloaded 2019 ACS 5-year estimates demographic data by
+# ZCTA
+
+ZCTAs_ACS_Chicago <- read_csv("../data/ZCTAs_ACS_Chicago.csv")
+
+ZCTAs_ACS_Vac_geom <- Chicago_COVID19Vaccinations_ByZCTA %>%
+  replace(., is.numeric(is.na(.)), "") %>%
+  drop_na(zcta) %>%
+  mutate(zcta = as.numeric(zcta)) %>%
+  left_join(ZCTAs_ACS_Chicago, by=c("zcta"="ZCTA5")) %>%
+  filter(Total>0) %>%
+  select(-pop) %>%
+  arrange(date,zcta) %>%
+  group_by(zcta) %>%
+  mutate(rec = 1,
+         T = cumsum(rec),
+         D = if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         doses7d = rollmean(x=doses_daily, k=7, fill=0, align="right"), 
+         dosert_totalpop = doses_cum/Total*100,
+         dosert_65over = doses_cum/Pop65Over*100,
+         dosert_18over = doses_cum/Pop18Over*100,
+         dosert_16over = doses_cum/Pop16Over*100,
+         dosert_essen = doses_cum/WESSEN*100,
+         fdoses7d = rollmean(x=fdose_daily, k=7, fill=0, align="right"), 
+         fdosert_totalpop = fdose_cum/Total*100,
+         fdosert_65over = fdose_cum/Pop65Over*100,
+         fdosert_18over = fdose_cum/Pop18Over*100,
+         fdosert_16over = fdose_cum/Pop16Over*100,
+         fdosert_essen = fdose_cum/WESSEN*100,
+         sdoses7d = rollmean(x=com_daily, k=7, fill=0, align="right"), 
+         sdosert_totalpop = com_cum/Total*100,
+         sdosert_65over = com_cum/Pop65Over*100,
+         sdosert_18over = com_cum/Pop18Over*100,
+         sdosert_16over = com_cum/Pop16Over*100,
+         sdosert_essen = com_cum/WESSEN*100)
+
+```
+
+```{r import-ccvi-data}
+
+ZCTAs_CCVI_Chicago <- read_csv("../data/Chicago_CCVI_ByZCTA.csv")
+
+```
+
+# Background
+
+The illness caused by Severe Acute Respiratory Syndrome Coronavirus-2 (SARS-CoV-2), coronavirus disease (COVID-19) was declared a pandemic by the World Health Organization in March 2020.[@scannellbryan2021] In absence of a cure and natural immunity to the disease, by May 2021, more than 500,000 Americans had died of COVID-19 and far more had been impacted. The distribution of the disease has not been uniform across the American population; rather, the burden of COVID-19 has disproportionately impacted racial and ethnic minorities, demonstrating the effects of longstanding inequities in social determinants of health, neighborhood traits, and underlying comorbidities. Racial/ethnic minority populations in urban settings are often employed in service occupations that prevent work-from-home and physical distancing.4 Further, crowding, multi-generational households, older housing stock, and substandard air quality also contribute to the increased rates of COVID-19 among racial/ethnic minority communities. Finally, racial/ethnic minority populations experience a disproportionate burden of comorbidities that impact the severity of COVID-19 (e.g., diabetes, cardiovascular disease, asthma, obesity). Identifying characteristics that are associated with increased COVID-19 risk, even if they are not causally related, can assist in prioritizing communities with high need for testing and vaccination to mitigate the continued impact of COVID-19.
+
+The Chicago COVID-19 Community Health Equity dashboard reports that the city of Chicago recorded 244,230 positive COVID-19 cases from March 13, 2020 through May 1, 2021, resulting in 4,984 deaths.6 Despite representing 28.5% and 28.8% of the city's total population, Black and Latinx populations represented 38.5% and 33.4% of deaths from COVID-19 respectively.6 Two highly effective COVID-19 vaccines were approved for emergency use in the United States in December 2020 and a third was authorized for use in February 2021.7 As COVID-19 vaccination is one of the most effective strategies to control spread and reduce morbidity and mortality, rapid and equitable dissemination is required to address the disproportionate burden of the disease on Black/Latinx populations. Public health officials must strategically prioritize the allocation of vaccine to those most in need, such as those disproportionately impacted by COVID-19.
+
+The Chicago COVID-19 Community Vulnerability Index (CCVI), adapted and modified from the CDC Social Vulnerability Index8, identifies communities that are uniquely vulnerable to adverse COVID-19 impacts using a ranking of ten components (risk factors and COVID-19 burden) that are synthesized into a single community-level composite score. Chicago community areas that received high CCVI scores had the highest mobility during COVID-19, low socioeconomic status, high rates of COVID-19 hospital admission, and high rates of COVID-19 mortality.8 Fifteen community areas in Chicago comprised the top quintile, 7 of which with predominantly Latinx residents and 8 with predominantly Black residents. To reduce further inequities in COVID-19 related outcomes, public health leaders acknowledged the importance of prioritizing communities with the highest burden of disease for equitable and effective vaccine distribution.
+
+## COVID-19 Burden in Chicago
+
+The Chicago COVID-19 Community Vulnerability Index (CCVI) was adapted and modified based on the CDC Social Vulnerability Index. The Chicago CCVI identifies communities that are uniquely vulnerable to barriers to COVID-19 vaccine uptake via a ranking of a combination of ten components (risk factors and COVID-19 burden) that are synthesized into a single composite score. Community areas that received high CCVI scores had the highest mobility during COVID-19, low socioeconomic status, high rates of COVID-19 hospital admission, and high rates of COVID-19 mortality. Fifteen community areas in Chicago made up the top quintile and corresponded to 7 majority Latinx and 8 majority Black community areas. As COVID-19 vaccines are in limited supply, allocation with a focus on communities most impacted is imperative for equitable and effective control.
+
+On January 25, 2021, Chicago Mayor Lori Lightfoot and the Chicago Department of Public Health announced its Protect Chicago Plus (PCP) vaccination program, which is designed to ensure equitable vaccine access for communities that experienced the highest CCVI. The plan identified 15 high-need communities which ranked highest according to the city's CCVI, increasing vaccine allocation in these areas and expanding eligibility to all residents 18 and over. The leveraged community stakeholders to reduce barriers to vaccine access via call-in lines, strike teams, mobile clinics, homebound distribution and other strategies to improve vaccine availability and acceptability.
+
+## Research Questions
+
+This study provides an overview of Chicago's COVID-19 vaccine distribution over a four-month period with a particular focus on evaluating whether or not improvements were made in the uptake of vaccine among the city's most vulnerable populations after implementation of its targeted distribution plan. Specifically, this research aims to respond to two research questions:
+
+(1) How do first-dose COVID-19 vaccination administrations differ across Chicago communities with different CCVI characteristics?
+
+(2) To what extent have municipal vaccination distribution strategies mitigated disparities in vaccination rates, especially in neighborhoods targeted in the city's Protect Chicago Plus program?
+
+# Methodology
+
+A series of chi-square analyses were employed to evaluate disparities in vaccination rates across communities categorized by dominant race and ethnic group, poverty status and relative CCVI. Multiple interrupted time series analyses (ITS) were then implemented to evaluate the impact of the city's PCP program on different measures of vaccination coverage and disparity, pre- and post-intervention. ITS was the preferred analytic framework because it required fewer controls, allowing for general inferences to be made about intervention efficacy with two independent variables - time and program start date.
+
+## Data
+
+To carry out the above analyses, we rely on publicly available data including:
+
+(1) population data including age, race, ethnicity and socioeconomic characteristics from the US Census Bureau's American Community Survey (ACS), 2015 to 2019 5-year estimates;
+
+(2) daily first dose COVID-19 vaccination counts from the City of Chicago's data portal; and
+
+(3) press releases from the City of Chicago, related media reports and personal communication with municipal public health personnel concerning the geographic scope, roll-out and overall implementation of the city's Protect Chicago Plus vaccination program.
+
+### COVID-19 Vaccination Disparities in Chicago
+
+```{r SummaryTable}
+
+Chicago_COVID19CasesDeathsTests_ByZCTA_sub <- Chicago_COVID19CasesDeathsTests_ByZCTA %>%
+  filter(ZCTA5!=60666) %>%
+  select(zcta=ZCTA5,
+         CasesCm,
+         DeathsCm,
+         TestsCm)
+
+# Counts through 5/1/2021
+CaseDeathTestCounts <- Chicago_COVID19CasesDeathsTests_ByZCTA_sub %>%
+  group_by() %>%
+  summarise(Cases =  sum(CasesCm),
+            Deaths =  sum(DeathsCm),
+            Tests =  sum(TestsCm))
+
+# join with case, deaths, tests data
+ZCTAs_ACS_Vac_Cas_geom <- ZCTAs_ACS_Vac_geom %>%
+  left_join(Chicago_COVID19CasesDeathsTests_ByZCTA_sub,by="zcta")
+
+# join with ccvi data
+ZCTAs_ACS_Vac_Cas_CCVI_geom <- ZCTAs_ACS_Vac_Cas_geom %>%
+  left_join(ZCTAs_CCVI_Chicago,by="zcta") %>%
+  mutate(pcp=if_else(ccvi_category=="HIGH","YES","NO"))
+
+summary_table <- ZCTAs_ACS_Vac_Cas_CCVI_geom %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  select(pcp,
+         ccvi_score,
+         CasesCm,
+         DeathsCm,
+         TestsCm,
+         fdose_cum,
+         com_cum,
+         Total,
+         Pop18Over,
+         Pop65Over,
+         POPBPOV,
+         POPBPOVTOT,
+         POPBLK,
+         POPASN,
+         POPLAT,
+         POPWHT,
+         WESSEN,
+         WORKERS,
+         POPNOHI,
+         POPHITOTAL) %>%
+  group_by("PCP Neighborhood"=pcp) %>%
+  summarize("Population" = format(sum(Total),scientific=FALSE,big.mark=","),
+            "Pop 18+" = format(sum(Pop18Over),scientific=FALSE,big.mark=","),
+            "% Pop 18+" = signif(sum(Pop18Over)/sum(Total)*100,3),
+            "Pop 65+" = format(sum(Pop65Over),scientific=FALSE,big.mark=","),
+            "% Pop 65+" = signif(sum(Pop65Over)/sum(Total)*100,3),
+            "Essential" = format(sum(WESSEN),scientific=FALSE,big.mark=","),
+            "% Essential" = signif(sum(WESSEN)/sum(WORKERS)*100,3),
+            "Cases" = format(sum(CasesCm),scientific=FALSE,big.mark=","),
+            "Case Rate" = signif(sum(CasesCm)/sum(Total)*1000,4),
+            "Deaths" = format(sum(DeathsCm),scientific=FALSE,big.mark=","),
+            "Death Rate" = signif(sum(DeathsCm)/sum(Total)*1000,2),
+            "Tests" = format(sum(TestsCm),scientific=FALSE,big.mark=","),
+            "Test Rate" = signif(sum(TestsCm)/sum(Total)*100,4),
+            "Positivity Rate" = signif(sum(CasesCm)/sum(TestsCm)*100,4),
+            "Mean CCVI" = signif(sum(ccvi_score*Total/sum(Total)),4),
+            "First Doses" = format(sum(fdose_cum),scientific=FALSE,big.mark=","),
+            "First Dose Rate (%)" = signif(sum(fdose_cum)/sum(Pop18Over)*100,3),
+            "Second Doses" = format(sum(com_cum),scientific=FALSE,big.mark=","),
+            "Second Dose Rate (%)" = signif(sum(com_cum)/sum(Pop18Over)*100,3),
+            "Asian, not Latinx" = format(sum(POPASN),scientific=FALSE,big.mark=","),
+            "% Asian" = signif(sum(POPASN)/sum(Total)*100,3),
+            "Black, not Latinx" = format(sum(POPBLK),scientific=FALSE,big.mark=","),
+            "% Black" = signif(sum(POPBLK)/sum(Total)*100,3),
+            "White, not Latinx" = format(sum(POPWHT),scientific=FALSE,big.mark=","),
+            "% White" = signif(sum(POPWHT)/sum(Total)*100,3),
+            "Latinx" = format(sum(POPLAT),scientific=FALSE,big.mark=","),
+            "% Latinx" = signif(sum(POPLAT)/sum(Total)*100,3),
+            "Below Poverty" = format(sum(POPBPOV),scientific=FALSE,big.mark=","),
+            "% Below Poverty" = signif(sum(POPBPOV)/sum(POPBPOVTOT)*100,3),
+            "Not Health Insurance" = format(sum(POPNOHI),scientific=FALSE,big.mark=","),
+            "% No Health Insurance" = signif(sum(POPNOHI)/sum(POPHITOTAL)*100,3),
+            "Workers" = format(sum(WORKERS),scientific=FALSE,big.mark=","),
+            "Poverty status" = format(sum(POPBPOVTOT),scientific=FALSE,big.mark=","),
+            "Health Insurance Status" = format(sum(POPHITOTAL),scientific=FALSE,big.mark=",")) %>%
+  knitr::kable(booktabs = TRUE, caption=paste0("First Dose COVID-19 Vaccination Rates by PCP Community Category, 12/15/2020 to 5/1/2021"))
+
+# City of Chicago numbers for same summary table
+summary_table_chicago <- ZCTAs_ACS_Vac_Cas_CCVI_geom %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  select(pcp,
+         ccvi_score,
+         CasesCm,
+         DeathsCm,
+         TestsCm,
+         fdose_cum,
+         com_cum,
+         Total,
+         Pop18Over,
+         Pop65Over,
+         POPBPOV,
+         POPBPOVTOT,
+         POPBLK,
+         POPASN,
+         POPLAT,
+         POPWHT,
+         WESSEN,
+         WORKERS,
+         POPNOHI,
+         POPHITOTAL) %>%
+  summarize("Population" = format(sum(Total),scientific=FALSE,big.mark=","),
+            "Pop 18+" = format(sum(Pop18Over),scientific=FALSE,big.mark=","),
+            "% Pop 18+" = signif(sum(Pop18Over)/sum(Total)*100,3),
+            "Pop 65+" = format(sum(Pop65Over),scientific=FALSE,big.mark=","),
+            "% Pop 65+" = signif(sum(Pop65Over)/sum(Total)*100,3),
+            "Essential" = format(sum(WESSEN),scientific=FALSE,big.mark=","),
+            "% Essential" = signif(sum(WESSEN)/sum(WORKERS)*100,3),
+            "Cases" = format(sum(CasesCm),scientific=FALSE,big.mark=","),
+            "Case Rate" = signif(sum(CasesCm)/sum(Total)*1000,4),
+            "Deaths" = format(sum(DeathsCm),scientific=FALSE,big.mark=","),
+            "Death Rate" = signif(sum(DeathsCm)/sum(Total)*1000,2),
+            "Tests" = format(sum(TestsCm),scientific=FALSE,big.mark=","),
+            "Test Rate" = signif(sum(TestsCm)/sum(Total)*100,4),
+            "Positivity Rate" = signif(sum(CasesCm)/sum(TestsCm)*100,4),
+            "Mean CCVI" = signif(sum(ccvi_score*Total/sum(Total)),4),
+            "First Doses" = format(sum(fdose_cum),scientific=FALSE,big.mark=","),
+            "First Dose Rate (%)" = signif(sum(fdose_cum)/sum(Pop18Over)*100,3),
+            "Second Doses" = format(sum(com_cum),scientific=FALSE,big.mark=","),
+            "Second Dose Rate (%)" = signif(sum(com_cum)/sum(Pop18Over)*100,3),
+            "Asian, not Latinx" = format(sum(POPASN),scientific=FALSE,big.mark=","),
+            "% Asian" = signif(sum(POPASN)/sum(Total)*100,3),
+            "Black, not Latinx" = format(sum(POPBLK),scientific=FALSE,big.mark=","),
+            "% Black" = signif(sum(POPBLK)/sum(Total)*100,3),
+            "White, not Latinx" = format(sum(POPWHT),scientific=FALSE,big.mark=","),
+            "% White" = signif(sum(POPWHT)/sum(Total)*100,3),
+            "Latinx" = format(sum(POPLAT),scientific=FALSE,big.mark=","),
+            "% Latinx" = signif(sum(POPLAT)/sum(Total)*100,3),
+            "Below Poverty" = format(sum(POPBPOV),scientific=FALSE,big.mark=","),
+            "% Below Poverty" = signif(sum(POPBPOV)/sum(POPBPOVTOT)*100,3),
+            "Not Health Insurance" = format(sum(POPNOHI),scientific=FALSE,big.mark=","),
+            "% No Health Insurance" = signif(sum(POPNOHI)/sum(POPHITOTAL)*100,3),
+            "Workers" = format(sum(WORKERS),scientific=FALSE,big.mark=","),
+            "Poverty status" = format(sum(POPBPOVTOT),scientific=FALSE,big.mark=","),
+            "Health Insurance Status" = format(sum(POPHITOTAL),scientific=FALSE,big.mark=",")) %>%
+  knitr::kable(booktabs = TRUE, caption=paste0("First Dose COVID-19 Vaccination Rates by PCP Community Category, 12/15/2020 to 5/1/2021"))
+
+```
+
+## Analysis
+
+Two-way contingency tables were created to represent daily cumulative first dose COVID-19 vaccination coverage rates by zip code category from December 29, 2020 (two weeks after the first COVID-19 vaccination dose was administered in the city) to May 1, 2021. Zip codes were categorized, "yes" and "no", by whether they were or were not prioritized in the city's PCP program.
+
+For each contingency table, a Pearson chi-squared test was carried out to detect statistically significant differences between vaccination coverage rates across the two categories of communities; with the null hypotheses being that no association exists. Each of these tests yielded a significant p-value, indicating that PCP participation and corresponding vaccination rates are associated throughout the entire study period although variations in the magnitude of these associations change over time.
+
+Figure 1 plots both the standardized residuals from the chi-square tests. Values positioned above the horizontal axis (i.e., greater than 0) indicate vaccination rates that are significantly greater than would be expected if the null hypothesis were true, whereas values positioned below the horizontal axis indicate rates that are significantly lower than would be expected. The plot clearly shows that, when evaluated collectively, communities that rank highest with respect to COVID-19 vulnerability, also underperform with respect to COVID-19 vaccination coverage. This gap narrowed in early February (indicated with dashed black vertical line) after the initial roll-out of the PCP vaccination program before widening again in late March as vaccine eligibility expanded to the broader population.
+
+```{r chi-square-analysis, fig.cap="Standardized Residuals of Chi-Square Analyses Comparing Daily Cumulative First Dose COVID-19 Vaccination Counts for Communities Inside (YES) and Outside (NO) PCP Target Area"}
+
+# get date list from 1/15/2021 onward
+aEndDateList <- ZCTAs_ACS_Vac_geom %>% 
+  group_by(date) %>% 
+  summarise() %>%
+  drop_na()
+
+aEndDateList <- aEndDateList[15:138,] # return subset of list
+achisqtable_All <- readRDS("../data/achisqtable_All.rds")
+achisqtable_All <- achisqtable_All[c(), ]
+
+ZCTAs_ACS_Vac_geom$NotVac_totpop <- ZCTAs_ACS_Vac_geom$Total-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_18over <- ZCTAs_ACS_Vac_geom$Pop18Over-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_16over <- ZCTAs_ACS_Vac_geom$Pop16Over-ZCTAs_ACS_Vac_geom$fdose_cum
+ZCTAs_ACS_Vac_geom$NotVac_essen <- ZCTAs_ACS_Vac_geom$WESSEN-ZCTAs_ACS_Vac_geom$fdose_cum
+
+# Run chi-square for all dates
+for (i in 1:nrow(aEndDateList)) {
+  ct_CountsbyCategory <- ZCTAs_ACS_Vac_geom %>%
+    filter(date == aEndDateList$date[i]) %>%
+    group_by(pcp) %>%
+    drop_na() %>%
+    summarize(Vaccinated = sum(fdose_cum),
+              # NotVaccinated = sum(NotVac_totpop))
+              NotVaccinated = sum(NotVac_16over))
+  
+  ct_CountsbyCategory[is.na(ct_CountsbyCategory)] <- 0
+  ct_CountsbyCategory_t <- t(ct_CountsbyCategory[,-1])
+  colnames(ct_CountsbyCategory_t) <- ct_CountsbyCategory$pcp
+  chisq_Results <- chisq.test(ct_CountsbyCategory_t)
+  achisqtable_obs <-  chisq_Results$observed
+  achisqtable_exp <- round(chisq_Results$expected,2)
+  achisqtable_exp <- achisqtable_exp[1,]
+  achisqtable_obs <- achisqtable_obs[1,]
+  achisqtable_cbind <- cbind(achisqtable_exp,achisqtable_obs)
+  achisqtable_cbind <- as.data.frame.matrix(achisqtable_cbind)
+  
+  achisqtable_cbind$date <- aEndDateList$date[i]
+  achisqtable_cbind$PValue <- chisq_Results$p.value
+  achisqtable_cbind$XSqrd <- chisq_Results$statistic
+  
+  achisqtable_res <- round(chisq_Results$residuals,3)
+  achisqtable_stdres <- round(chisq_Results$stdres,3)
+  achisqtable_res <- achisqtable_res[1,]
+  achisqtable_stdres <- achisqtable_stdres[1,]
+  achisqtable_cbind_res <- cbind(achisqtable_res,achisqtable_stdres)
+  achisqtable_cbind_res <- as.data.frame.matrix(achisqtable_cbind_res)
+  achisqtable_cbind <- cbind(achisqtable_cbind,achisqtable_cbind_res)
+  
+  achisqtable_cbind$df <- chisq_Results$parameter
+  achisqtable_cbind <- cbind(rownames(achisqtable_cbind), data.frame(achisqtable_cbind, row.names=NULL))
+  achisqtable_All <- rbind(achisqtable_cbind,achisqtable_All)
+}
+
+achisqtable_All <- achisqtable_All %>% 
+  rename("Vaccinated"=`rownames(achisqtable_cbind)`,
+         "Residual"=achisqtable_res,
+         "StdResidual"=achisqtable_stdres,
+         "Expected"=achisqtable_exp,
+         "Observed"=achisqtable_obs)
+
+# create residual plot
+
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+ggplot(achisqtable_All) + 
+  geom_line(aes(x=date,y=StdResidual, color=Vaccinated), size = 1) + 
+  scale_color_jama() +  
+  theme(legend.position="top", 
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(),
+        legend.key=element_blank(), 
+        axis.ticks=element_line(size=1), 
+        axis.text.x = element_text(angle = 0), 
+        text=element_text(family="Times")) + 
+  geom_vline(xintercept = as.Date("2021-02-05"), linetype="dashed") + 
+  ylab("Standardized Residuals") + 
+  annotate("text", angle=90, x=as.Date("2021-02-07"), y=0, label= "PCP implementation begins") + 
+  annotate("text", x=as.Date("2021-01-15"), y=0, label= "pre-intervention") + 
+  annotate("text", x=as.Date("2021-03-15"), y=0, label= "post-intervention")
+
+# clear subsequent chi-square analyses
+achisqtable_All <- read_rds(file= "../data/achisqtable_All.rds")
+achisqtable_All <- achisqtable_All[c(), ]
+```
+
+```{r ITS-plot_pcp, fig.cap="Interrupted Time Series (ITS) Analysis of Cumulative First-Dose COVID-19 Vaccination Rates, Pre- and Post-Rollout of the Protect Chicago Plus Program by Community Category"}
+
+ZCTAs_ACS_Vac_PCP_geom <- ZCTAs_ACS_Vac_geom %>%
+  drop_na(zcta) %>%
+  filter(Total>0,
+         date<= as.Date("2021-05-01")) %>%
+  arrange(pcp, date) %>%
+  group_by(pcp, date) %>%
+  summarize(rec = 1, 
+            doses_cum = sum(doses_cum),
+            Total = sum(Pop18Over)) %>%
+  mutate(Y = doses_cum/Total*100, 
+         D=if_else(date>=as.Date("2021-02-05"),1,0),
+         P = if_else(D>=1,cumsum(D),0),
+         T = cumsum(rec))
+
+# Create table for counterfactuals by community type
+ZCTAs_ACS_Vac_PCP_cf <- ZCTAs_ACS_Vac_geom %>%
+  drop_na(zcta) %>%
+  filter(Total>0,
+         date<=as.Date("2021-05-01")) %>%
+  arrange(pcp, date) %>%
+  group_by(pcp, date) %>%
+  summarize(rec = 1, 
+            doses_cum = sum(doses_cum),
+            Total = sum(Pop18Over)) %>%
+  mutate(Y = doses_cum/Total*100, 
+         D = 0,
+         P = 0,
+         T = cumsum(rec))
+
+# Select columns for simplified ITS data table
+dataTS <- ZCTAs_ACS_Vac_PCP_geom %>%
+  select(pcp, 
+         date,
+         T,
+         D,
+         P,
+         Y)
+
+# Select columns for simple ITS counterfactual data table
+dataTS_cf <- ZCTAs_ACS_Vac_PCP_cf %>%
+  select(pcp, 
+         date,
+         T,
+         D,
+         P,
+         Y)
+
+# regressions for plot
+dataTS_No <- dataTS %>% 
+  ungroup() %>% 
+  filter(pcp=="NO")
+
+dataTS_Yes <- dataTS %>% 
+  ungroup() %>% 
+  filter(pcp=="YES") 
+
+dataTS_cf <- as.data.frame(bind_cols(T=as.numeric(rep(1:138)),D=rep(0), P=rep(0)))
+
+ts_no_pre <- lm( Y ~ T + D + P, data=dataTS_No[1:52,])
+ts_yes_pre <- lm( Y ~ T + D + P, data=dataTS_Yes[1:52,])
+
+ts_no <- lm( Y ~ T + D + P, data=dataTS_No)
+ts_yes <- lm( Y ~ T + D + P, data=dataTS_Yes)
+
+
+ts_yes_cf <- predict(ts_yes, dataTS_cf)
+ts_no_cf <- predict(ts_no, dataTS_cf)
+
+dataTS_cf_Yes <- dataTS_Yes %>% 
+  select(date,
+         pcp) %>%
+  bind_cols(dataTS_cf)
+
+dataTS_cf_No <- dataTS_No %>% 
+  select(date,
+         pcp) %>%
+  bind_cols(dataTS_cf)
+
+  
+  ggplot() + 
+    
+    theme(legend.position="top", 
+          legend.title = element_blank(),
+          legend.key=element_blank(), 
+          axis.ticks=element_line(size=1), 
+          text=element_text(family="Times"),
+          panel.border =  element_rect(color="grey", fill=NA)) + 
+    
+    scale_y_continuous(limits = c(0, 100)) +
+  
+    # plot pre-intervention line for "no" communities
+      geom_line(data = dataTS_No[1:52,], size = 1, aes(x = date, y = ts_no$fitted.values[1:52], color=pcp)) +
+  
+      # plot post-intervention line for "no" communities
+      geom_line(data = dataTS_No[53:138,], size = 1, aes(x = date-1, y = ts_no$fitted.value[53:138]+4.9675, color=pcp)) +
+    
+      # plot pre-intervention line for "yes" communitie
+      geom_line(data = dataTS_Yes[1:52,], size = 1, aes(x = date[1:52], y = ts_yes$fitted.values[1:52], color=pcp)) +
+    
+      # plot post-intervention line for "yes" communities
+          geom_line(data = dataTS_Yes[53:138,], size = 1, aes(x = date-1, y = ts_yes$fitted.values[53:138]+4.9675, color=pcp)) +
+    
+      # plot post-intervention line for "no" counterfactual
+          geom_line(data = dataTS_cf_No[53:138,], size = 1, linetype="dotted", aes(x = date-1, y = ts_no_cf[53:138], color=pcp)) +
+  
+        # plot post-intervention line for "yes" counterfactual
+          geom_line(data = dataTS_cf_Yes[53:138,], linetype = "dotted", size = 1, aes(x = date-1, y = ts_yes_cf[53:138], color=pcp)) +
+  
+    xlab("") +
+    ylab("First Dose Vaccination Rate (%)") + 
+    scale_color_jama() + 
+    # scale_color_manual(values=c('#606060','#000000')) + 
+  
+    geom_vline(xintercept = as.Date("2021-02-03"), linetype="dashed") + 
+    annotate("text", angle=90, x=as.Date("2021-02-05"), y=60, label= "PCP implementation begins") +
+    annotate("text", x=as.Date("2021-01-05"), y=90, label= "pre-intervention") + 
+    annotate("text", x=as.Date("2021-03-15"), y=90, label= "post-intervention") +
+    annotate("text", x=as.Date("2021-04-05"), y=40, label= "counterfactual", color="gray50")
+
+```
+
+```{r ITS-regression_pcpno, results='asis', fig.cap = "ITS Regression Results for PCP (NO) Category Communities"}
+
+summ(ts_no)
+summ(ts_yes)
+
+stargazer( ts_no, 
+           type = "text", 
+           dep.var.labels = ("No Coverage Rates"),
+           column.labels = ("Model results"),
+           covariate.labels = c("Time", "Treatment", 
+                                "Time Since Treatment"),
+           omit.stat = "all", 
+           digits = 2 )
+
+
+stargazer( ts_yes, 
+           type = "text", 
+           dep.var.labels = ("Yes Coverage Rates"),
+           column.labels = ("Model results"),
+           covariate.labels = c("Time", "Treatment", 
+                                "Time Since Treatment"),
+           omit.stat = "all", 
+           digits = 2 )
+
+
+```
+
+# References
